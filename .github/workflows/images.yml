@@ -9,12 +9,12 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_PREFIX: ${{ github.repository_owner }}/articleswap-
+  IMAGE_PREFIX: ${{ github.repository_owner }}/articleswap
   PLATFORMS: linux/amd64,linux/arm64
 
 jobs:
   build:
-    name: build/${{ matrix.service.name }}
+    name: build/${{ matrix.name }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -58,7 +58,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.service.name }}
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.name }}
           tags: |
             type=ref,event=branch
             type=ref,event=pr
@@ -68,8 +68,8 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          context: ${{ matrix.service.context }}
-          file: ${{ matrix.service.dockerfile }}
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
           platforms: ${{ env.PLATFORMS }}
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
