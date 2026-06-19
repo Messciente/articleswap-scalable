@@ -134,6 +134,7 @@ services:
       retries: 20
     networks:
       - articleswap-net
+      - dokploy-network
 
   minio-init:
     image: minio/mc:latest
