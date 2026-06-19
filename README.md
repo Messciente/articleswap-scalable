@@ -263,6 +263,7 @@ docker pull ghcr.io/<owner>/articleswap-article-service:latest
 docker pull ghcr.io/<owner>/articleswap-stemming-service:latest
 docker pull ghcr.io/<owner>/articleswap-wordcloud-service:latest
 docker pull ghcr.io/<owner>/articleswap-forwarding-inbox-service:latest
+docker pull ghcr.io/<owner>/articleswap-nginx:latest
 ```
 
 Required secret: `GITHUB_TOKEN` (provided automatically). The workflow uses it to authenticate to GHCR.

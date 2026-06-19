@@ -6,11 +6,21 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      multiarch:
+        description: 'Build for linux/amd64 + linux/arm64 (off = amd64 only, much smaller images)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
 
 env:
   REGISTRY: ghcr.io
   IMAGE_PREFIX: ${{ github.repository_owner }}/articleswap
-  PLATFORMS: linux/amd64,linux/arm64
+  PLATFORMS_DEFAULT: linux/amd64
+  PLATFORMS_MULTI: linux/amd64,linux/arm64
 
 jobs:
   build:
@@ -38,6 +48,9 @@ jobs:
           - name: forwarding-inbox-service
             context: services/forwarding-inbox-service
             dockerfile: services/forwarding-inbox-service/Dockerfile
+          - name: nginx
+            context: nginx
+            dockerfile: nginx/Dockerfile
 
     steps:
       - name: Checkout
@@ -70,7 +83,7 @@ jobs:
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
-          platforms: ${{ env.PLATFORMS }}
+          platforms: ${{ github.event_name == 'pull_request' && env.PLATFORMS_DEFAULT || (inputs.multiarch == 'true' && env.PLATFORMS_MULTI || env.PLATFORMS_DEFAULT) }}
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
