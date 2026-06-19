@@ -2,6 +2,7 @@ services:
   kafka:
     image: apache/kafka:latest
     container_name: articleswap-kafka
+    hostname: kafka
     environment:
       - KAFKA_NODE_ID=0
       - KAFKA_PROCESS_ROLES=controller,broker
@@ -31,6 +32,7 @@ services:
     image: ${IMAGE_API_GATEWAY}
     pull_policy: always
     container_name: articleswap-gateway1
+    hostname: api-gateway1
     environment:
       - KAFKA_BROKERS=kafka:9092
       - KAFKA_TOPIC=article-delivered
@@ -48,6 +50,7 @@ services:
     image: ${IMAGE_API_GATEWAY}
     pull_policy: always
     container_name: articleswap-gateway2
+    hostname: api-gateway2
     environment:
       - KAFKA_BROKERS=kafka:9092
       - KAFKA_TOPIC=article-delivered
@@ -71,6 +74,9 @@ services:
       - KAFKA_CLIENT_ID=article-service
       - PORT=3000
       - DATABASE_URL=${DATABASE_URL}
+      - TRUST_PROXY=1
+      - RATE_LIMIT_WINDOW_MS=${RATE_LIMIT_WINDOW_MS:-60000}
+      - RATE_LIMIT_MAX_REQUESTS=${RATE_LIMIT_MAX_REQUESTS:-30}
     depends_on:
       kafka:
         condition: service_healthy
@@ -96,24 +102,25 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: articleswap-postgres
+    hostname: postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - postgres-data:/var/lib/postgresql/data
-    networks:
-      - articleswap-net
-
-  redis:
-    image: redis:7-alpine
-    container_name: articleswap-redis
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
     networks:
       - articleswap-net
 
   minio:
     image: minio/minio:latest
     container_name: articleswap-minio
+    hostname: minio
     command: server /data --console-address ":9001"
     environment:
       - MINIO_ROOT_USER=${MINIO_ROOT_USER}
@@ -137,8 +144,8 @@ services:
     entrypoint: >
       /bin/sh -c "
       mc alias set local http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD};
-      mc mb -p local/wordclouds;
-      mc anonymous set download local/wordclouds;
+      mc mb -p local/${MINIO_BUCKET};
+      mc anonymous set download local/${MINIO_BUCKET};
       exit 0;
       "
     networks:
@@ -170,11 +177,11 @@ services:
       - DATABASE_URL=${DATABASE_URL}
       - CONSUME_TOPIC=article-stemmed
       - PRODUCE_TOPIC=article-wordcloud-generated
-      - MINIO_ENDPOINT=minio
+      - MINIO_ENDPOINT=${MINIO_HOST}
       - MINIO_PORT=9000
       - MINIO_ACCESS_KEY=${MINIO_ROOT_USER}
       - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD}
-      - MINIO_BUCKET=wordclouds
+      - MINIO_BUCKET=${MINIO_BUCKET}
       - MINIO_USE_SSL=false
       - PUBLIC_MINIO_URL=${PUBLIC_MINIO_URL}
     depends_on:
