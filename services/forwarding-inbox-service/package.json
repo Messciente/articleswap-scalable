@@ -9,8 +9,8 @@
     "dev": "node --watch index.js"
   },
   "dependencies": {
-    "dotenv": "*",
-    "kafkajs": "*",
-    "pg": "*"
+    "dotenv": "^17.4.2",
+    "kafkajs": "^2.2.4",
+    "pg": "^8.21.0"
   }
 }

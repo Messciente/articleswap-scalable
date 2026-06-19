@@ -35,10 +35,25 @@ export class Article {
       id: this.id,
       title: this.title,
       content: this.content,
-      file: this.file,
+      file: this.file ? { name: this.file.name, size: approximateBase64Bytes(this.file.data) } : null,
       sender: this.sender,
       receiver: this.receiver,
       timestamp: this.timestamp
     };
   }
+
+  toEventPayload() {
+    const maxEventContentChars = 200_000;
+    return {
+      ...this.toJSON(),
+      content: this.content.length > maxEventContentChars
+        ? this.content.slice(0, maxEventContentChars)
+        : this.content,
+      contentTruncated: this.content.length > maxEventContentChars
+    };
+  }
+}
+
+function approximateBase64Bytes(value) {
+  return value ? Math.floor((value.length * 3) / 4) : 0;
 }

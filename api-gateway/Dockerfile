@@ -20,4 +20,4 @@ ENV CHOKIDAR_USEPOLLING=true
 ENV HOST=0.0.0.0
 
 # Port + host passed by docker-compose command
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173", "--strictPort"]
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173", "--strictPort", "--force"]

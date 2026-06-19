@@ -291,3 +291,17 @@ h2 {
   line-height: 1;
 }
 
+.word-cloud-box a {
+  color: #1d4ed8;
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+
+.word-cloud-box img {
+  width: 100%;
+  max-height: 280px;
+  object-fit: contain;
+  background: #ffffff;
+  border: 1.5px solid #000000;
+}
+

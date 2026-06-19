@@ -153,11 +153,15 @@ h2 {
   height: 100%;
   opacity: 0;
   cursor: pointer;
+  z-index: 2;
 }
 
 .file-info-text {
   font-size: 0.95rem;
   color: #737373;
+  pointer-events: none;
+  position: relative;
+  z-index: 1;
 }
 
 .file-selected {

@@ -40,6 +40,9 @@ export interface ListedArticle {
   has_file: boolean;
   created_at: string;
   updated_at: string;
+  stemmed_content?: string | null;
+  wordcloud_url?: string | null;
+  delivered_at?: string | null;
 }
 
 export interface ListArticlesResult {
@@ -53,6 +56,7 @@ export interface ArticleDetail extends ListedArticle {
   content: string | null;
   hasFile: boolean;
   fileName: string | null;
+  read_at?: string | null;
 }
 
 export class HttpError extends Error {

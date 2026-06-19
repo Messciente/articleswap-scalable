@@ -17,6 +17,8 @@ services:
       - KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1
       - KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1
       - KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS=0
+      - KAFKA_MESSAGE_MAX_BYTES=10485760
+      - KAFKA_REPLICA_FETCH_MAX_BYTES=10485760
     healthcheck:
       test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
       interval: 5s
@@ -32,7 +34,7 @@ services:
     container_name: articleswap-gateway1
     environment:
       - KAFKA_BROKERS=kafka:9092
-      - KAFKA_TOPIC=article-submissions
+      - KAFKA_TOPIC=article-delivered
       - KAFKA_CLIENT_ID=articles-api-gateway
       - CLUSTER_PEERS=gateway1:5173,gateway2:5173
       - HOSTNAME=gateway1
@@ -51,7 +53,7 @@ services:
     container_name: articleswap-gateway2
     environment:
       - KAFKA_BROKERS=kafka:9092
-      - KAFKA_TOPIC=article-submissions
+      - KAFKA_TOPIC=article-delivered
       - KAFKA_CLIENT_ID=articles-api-gateway
       - CLUSTER_PEERS=gateway1:5173,gateway2:5173
       - HOSTNAME=gateway2

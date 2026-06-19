@@ -52,10 +52,20 @@ export class PostgresArticleRepository {
    */
   async findById(id) {
     const result = await this.pool.query(
-      `SELECT id, title, content, file_name, file_data, file_size,
-              sender, receiver, status, created_at, updated_at
-         FROM articles
-        WHERE id = $1`,
+      `SELECT a.id, a.title, a.content, a.file_name, a.file_data, a.file_size,
+              a.sender, a.receiver, a.status, a.created_at, a.updated_at,
+              stemmed.stemmed_content,
+              wordcloud.wordcloud_url,
+              delivery.delivered_at,
+              delivery.read_at
+         FROM articles a
+         LEFT JOIN article_processing stemmed
+           ON stemmed.article_id = a.id AND stemmed.stage = 'STEMMED'
+         LEFT JOIN article_processing wordcloud
+           ON wordcloud.article_id = a.id AND wordcloud.stage = 'WORDCLOUD_GENERATED'
+         LEFT JOIN article_delivery delivery
+           ON delivery.article_id = a.id AND delivery.receiver = a.receiver
+        WHERE a.id = $1`,
       [id]
     );
     return result.rows[0] || null;
@@ -97,14 +107,23 @@ export class PostgresArticleRepository {
     const safeOffset = Math.max(0, Number(offset) || 0);
 
     const result = await this.pool.query(
-      `SELECT id, title, sender, receiver, status,
-              file_name, file_size, created_at, updated_at,
-              (file_data IS NOT NULL) AS has_file
-         FROM articles
-        WHERE ($1::text IS NULL OR sender   = $1)
-          AND ($2::text IS NULL OR receiver = $2)
-          AND ($3::text IS NULL OR status   = $3)
-        ORDER BY created_at DESC
+      `SELECT a.id, a.title, a.sender, a.receiver, a.status,
+              a.file_name, a.file_size, a.created_at, a.updated_at,
+              (a.file_data IS NOT NULL) AS has_file,
+              wordcloud.wordcloud_url,
+              stemmed.stemmed_content,
+              delivery.delivered_at
+         FROM articles a
+         LEFT JOIN article_processing stemmed
+           ON stemmed.article_id = a.id AND stemmed.stage = 'STEMMED'
+         LEFT JOIN article_processing wordcloud
+           ON wordcloud.article_id = a.id AND wordcloud.stage = 'WORDCLOUD_GENERATED'
+         LEFT JOIN article_delivery delivery
+           ON delivery.article_id = a.id AND delivery.receiver = a.receiver
+        WHERE ($1::text IS NULL OR a.sender   = $1)
+          AND ($2::text IS NULL OR a.receiver = $2)
+          AND ($3::text IS NULL OR a.status   = $3)
+        ORDER BY a.created_at DESC
         LIMIT $4 OFFSET $5`,
       [sender || null, receiver || null, status || null, safeLimit, safeOffset]
     );
@@ -121,9 +140,9 @@ export class PostgresArticleRepository {
     const result = await this.pool.query(
       `SELECT COUNT(*)::int AS total
          FROM articles
-        WHERE ($1::text IS NULL OR sender   = $1)
-          AND ($2::text IS NULL OR receiver = $2)
-          AND ($3::text IS NULL OR status   = $3)`,
+        WHERE ($1::text IS NULL OR articles.sender   = $1)
+          AND ($2::text IS NULL OR articles.receiver = $2)
+          AND ($3::text IS NULL OR articles.status   = $3)`,
       [sender || null, receiver || null, status || null]
     );
     return result.rows[0].total;

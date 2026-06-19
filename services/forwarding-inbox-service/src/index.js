@@ -3,6 +3,8 @@ import { KafkaEventPublisher } from './infrastructure/messaging/KafkaEventPublis
 import { KafkaEventConsumer } from './infrastructure/messaging/KafkaEventConsumer.js';
 import { KafkaTopicEnsurer } from './infrastructure/kafka/KafkaTopicEnsurer.js';
 import { createArticleHandler } from './interfaces/messaging/handler.js';
+import pg from 'pg';
+import { PostgresDeliveryRepository } from './infrastructure/persistence/PostgresDeliveryRepository.js';
 
 const SERVICE = 'forwarding-inbox-service';
 
@@ -10,6 +12,7 @@ async function main() {
   const brokers = process.env.KAFKA_BROKERS || 'localhost:9092';
   const consumeTopic = process.env.CONSUME_TOPIC || 'article-wordcloud-generated';
   const produceTopic = process.env.PRODUCE_TOPIC || 'article-delivered';
+  const databaseUrl = process.env.DATABASE_URL;
 
   const eventPublisher = new KafkaEventPublisher({
     brokers,
@@ -27,12 +30,27 @@ async function main() {
     clientId: `${SERVICE}-admin`
   });
 
+  let deliveryRepository = null;
+  if (databaseUrl) {
+    const pool = new pg.Pool({
+      connectionString: databaseUrl,
+      max: 10,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 5000
+    });
+    deliveryRepository = new PostgresDeliveryRepository({ pool });
+    console.log(`[${SERVICE}] DB ready`);
+  } else {
+    console.warn(`[${SERVICE}] DATABASE_URL not set — DB delivery updates disabled`);
+  }
+
   const handler = createArticleHandler({
     eventPublisher,
     kafkaConsumer,
     topicEnsurer,
     consumeTopic,
-    produceTopic
+    produceTopic,
+    deliveryRepository
   });
 
   await eventPublisher.connect();

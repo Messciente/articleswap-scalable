@@ -18,7 +18,7 @@ export class KafkaEventConsumer {
 
   async subscribe({ topic, handler, fromBeginning = false }) {
     await this.connect();
-    await this.consumer.subscribe({ topic, fromBeginning });
+    await retryKafka(`subscribe ${topic}`, () => this.consumer.subscribe({ topic, fromBeginning }));
     await this.consumer.run({
       eachMessage: async ({ message }) => {
         if (!message.value) return;
@@ -36,6 +36,18 @@ export class KafkaEventConsumer {
     if (this.consumer) {
       await this.consumer.disconnect();
       this.consumer = null;
+    }
+  }
+}
+
+async function retryKafka(label, operation) {
+  for (let attempt = 1; attempt <= 8; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      console.error(`[kafka-consumer] ${label} failed attempt ${attempt}:`, error.message);
+      if (attempt === 8) throw error;
+      await new Promise((resolve) => setTimeout(resolve, attempt * 500));
     }
   }
 }

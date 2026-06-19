@@ -14,8 +14,9 @@
       file?: { name: string; data: string };
       time: string;
       status?: string;
-      stemmed?: string;
-      wordCloud?: Array<{ word: string; count: number }>;
+      stemmedContent?: string;
+      wordcloudUrl?: string;
+      deliveredAt?: string;
     }>
   >([]);
   let eventSource: EventSource | null = null;
@@ -54,8 +55,9 @@
             file: payload.file,
             time: new Date().toLocaleTimeString(),
             status: payload.status,
-            stemmed: payload.stemmed,
-            wordCloud: payload.wordCloud,
+            stemmedContent: payload.stemmedContent ?? payload.stemmed_content,
+            wordcloudUrl: payload.wordcloudUrl ?? payload.wordcloud_url,
+            deliveredAt: payload.deliveredAt,
           },
           ...receivedArticles,
         ];
@@ -143,25 +145,20 @@
             <p class="incoming-content">{article.content}</p>
           {/if}
 
-          {#if article.status === 'pipeline_processed'}
+          {#if article.status === 'DELIVERED' || article.stemmedContent || article.wordcloudUrl}
             <div class="analysis-results">
-              {#if article.stemmed}
+              {#if article.stemmedContent}
                 <div class="stemming-box">
                   <strong>Hasil Stemming:</strong>
-                  <span class="stemmed-tokens">{article.stemmed}</span>
+                  <span class="stemmed-tokens">{article.stemmedContent}</span>
                 </div>
               {/if}
 
-              {#if article.wordCloud && article.wordCloud.length > 0}
+              {#if article.wordcloudUrl}
                 <div class="word-cloud-box">
-                  <strong>Word Cloud Frequencies:</strong>
-                  <div class="word-cloud-tags">
-                    {#each article.wordCloud as tag}
-                      <span class="cloud-tag" style="font-size: {Math.min(1.4, 0.75 + tag.count * 0.05)}rem">
-                        {tag.word} ({tag.count})
-                      </span>
-                    {/each}
-                  </div>
+                  <strong>Word Cloud:</strong>
+                  <a href={article.wordcloudUrl} target="_blank" rel="noreferrer">Buka gambar wordcloud</a>
+                  <img src={article.wordcloudUrl} alt={`Wordcloud untuk ${article.title}`} loading="lazy" />
                 </div>
               {/if}
             </div>

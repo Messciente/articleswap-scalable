@@ -9,10 +9,12 @@
     "dev": "node --watch src/index.js"
   },
   "dependencies": {
-    "dotenv": "*",
-    "express": "*",
-    "kafkajs": "*",
-    "pg": "*",
-    "zod": "*"
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.5.2",
+    "kafkajs": "^2.2.4",
+    "pdf-parse": "^2.4.5",
+    "pg": "^8.21.0",
+    "zod": "^4.4.3"
   }
 }

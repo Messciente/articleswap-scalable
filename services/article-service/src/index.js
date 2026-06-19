@@ -9,6 +9,8 @@ import { KafkaEventPublisher } from './infrastructure/messaging/KafkaEventPublis
 import { KafkaTopicEnsurer } from './infrastructure/kafka/KafkaTopicEnsurer.js';
 import { PostgresArticleRepository } from './infrastructure/persistence/PostgresArticleRepository.js';
 import { runMigrations } from './infrastructure/persistence/migrate.js';
+import { createArticleSubmitRateLimiter } from './infrastructure/http/rateLimit.js';
+import { TtlCache } from './infrastructure/cache/TtlCache.js';
 
 const SERVICE = 'article-service';
 
@@ -27,8 +29,10 @@ async function main() {
     clientId: `${SERVICE}-admin`
   });
 
-  await topicEnsurer.ensure(topic);
-  await eventPublisher.connect();
+  await Promise.all([
+    topicEnsurer.ensure(topic),
+    eventPublisher.connect()
+  ]);
 
   let pool = null;
   let articleRepository = null;
@@ -51,7 +55,10 @@ async function main() {
   const listArticlesUseCase = new ListArticles({ articleRepository });
 
   const app = express();
-  app.use(express.json({ limit: '15mb' }));
+  if (process.env.TRUST_PROXY) {
+    app.set('trust proxy', Number(process.env.TRUST_PROXY));
+  }
+  app.use(express.json({ limit: '40mb' }));
   app.get('/health', async (_req, res) => {
     if (!pool) return res.json({ status: 'ok', db: 'disabled' });
     try {
@@ -61,7 +68,17 @@ async function main() {
       return res.status(503).json({ status: 'degraded', db: 'error', error: e.message });
     }
   });
-  app.use('/api', createArticlesRoute({ submitArticleUseCase, getArticleUseCase, listArticlesUseCase }));
+  const readCache = new TtlCache({
+    ttlMs: Number(process.env.ARTICLE_CACHE_TTL_MS) || 30_000,
+    maxEntries: Number(process.env.ARTICLE_CACHE_MAX_ENTRIES) || 500
+  });
+  const submitRateLimiter = createArticleSubmitRateLimiter();
+
+  app.use('/api/articles', (req, res, next) => {
+    if (req.method !== 'POST') return next();
+    return submitRateLimiter(req, res, next);
+  });
+  app.use('/api', createArticlesRoute({ submitArticleUseCase, getArticleUseCase, listArticlesUseCase, readCache }));
 
   const port = Number(process.env.PORT) || 3000;
   const host = process.env.HOST || '0.0.0.0';

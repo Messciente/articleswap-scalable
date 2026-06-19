@@ -1,4 +1,5 @@
 import { Kafka, logLevel } from 'kafkajs';
+import { CircuitBreaker } from './CircuitBreaker.js';
 
 export class KafkaEventPublisher {
   constructor({ brokers, clientId }) {
@@ -6,6 +7,10 @@ export class KafkaEventPublisher {
     this.clientId = clientId || 'publisher';
     this.kafka = new Kafka({ clientId: this.clientId, brokers: this.brokers, logLevel: logLevel.WARN });
     this.producer = null;
+    this.breaker = new CircuitBreaker({
+      failureThreshold: Number(process.env.KAFKA_CIRCUIT_FAILURE_THRESHOLD) || 3,
+      cooldownMs: Number(process.env.KAFKA_CIRCUIT_COOLDOWN_MS) || 10_000
+    });
   }
 
   async connect() {
@@ -16,10 +21,12 @@ export class KafkaEventPublisher {
   }
 
   async publish({ topic, key, value }) {
-    await this.connect();
-    await this.producer.send({
-      topic,
-      messages: [{ key, value: JSON.stringify(value) }]
+    await this.breaker.execute(async () => {
+      await this.connect();
+      return this.producer.send({
+        topic,
+        messages: [{ key, value: JSON.stringify(value) }]
+      });
     });
   }
 

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onDestroy, onMount } from "svelte";
   import { slide } from "svelte/transition";
   import {
     HttpError,
@@ -29,7 +29,7 @@
     submitResult?: SubmitResult;
   } = $props();
 
-  const MAX_FILE_BYTES = 10 * 1024 * 1024;
+  const MAX_FILE_BYTES = 25 * 1024 * 1024;
   const LIST_LIMIT = 10;
 
   let title = $state("");
@@ -47,6 +47,9 @@
   let statusDetail = $state((() => submitResult?.detail ?? "")());
   let articleId = $state((() => submitResult?.articleId ?? "")());
   let lastFetched: ArticleDetail | null = $state(null);
+  let progressPercent = $state(0);
+  let progressLabel = $state("Menunggu submit");
+  let progressTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Recent submissions list (auto-fetched from article-service)
   let recent = $state<ListedArticle[]>((() => initialRecent)());
@@ -109,6 +112,24 @@
     }
   }
 
+  function progressForStatus(s?: string): { percent: number; label: string; done: boolean } {
+    switch (s) {
+      case "PENDING": return { percent: 25, label: "Artikel disimpan, menunggu stemming", done: false };
+      case "STEMMED": return { percent: 50, label: "Stemming selesai, membuat wordcloud", done: false };
+      case "WORDCLOUD_GENERATED": return { percent: 75, label: "Wordcloud selesai, mengirim ke inbox", done: false };
+      case "DELIVERED": return { percent: 100, label: "Selesai: artikel terkirim ke inbox", done: true };
+      case "FAILED": return { percent: 100, label: "Pipeline gagal", done: true };
+      default: return { percent: 10, label: "Mengirim ke pipeline", done: false };
+    }
+  }
+
+  function stopProgressPolling() {
+    if (progressTimer) {
+      clearTimeout(progressTimer);
+      progressTimer = null;
+    }
+  }
+
   function errorMessage(error: unknown, fallback: string): string {
     return error instanceof Error ? error.message : fallback;
   }
@@ -150,10 +171,35 @@
     try {
       const data = await getArticle(id);
       lastFetched = data;
+      const progress = progressForStatus(data?.status);
+      progressPercent = progress.percent;
+      progressLabel = progress.label;
     } catch (e: unknown) {
       statusMessage = "Gagal mengambil artikel";
       statusDetail = errorMessage(e, "Gagal mengambil artikel dari database");
     }
+  }
+
+  async function pollProgress(id: string) {
+    stopProgressPolling();
+    try {
+      const data = await getArticle(id);
+      if (data) {
+        lastFetched = data;
+        const progress = progressForStatus(data.status);
+        progressPercent = progress.percent;
+        progressLabel = progress.label;
+        statusDetail = `${progress.label}. Status: ${data.status}.`;
+        await refreshList();
+        if (progress.done) {
+          status = data.status === "FAILED" ? "error" : "success";
+          return;
+        }
+      }
+    } catch (e: unknown) {
+      progressLabel = errorMessage(e, "Gagal cek progress pipeline");
+    }
+    progressTimer = setTimeout(() => void pollProgress(id), 1500);
   }
 
   /**
@@ -170,18 +216,28 @@
   }
 
   onMount(() => {
+    if (window.location.search.includes("/submitArticle")) {
+      window.history.replaceState(null, "", window.location.pathname);
+    }
     refreshList();
+  });
+
+  onDestroy(() => {
+    stopProgressPolling();
   });
 
   async function handleSubmit(e: Event) {
     e.preventDefault();
+    stopProgressPolling();
     status = "submitting";
     statusMessage = "Sedang mengirim artikel...";
     statusDetail = "";
     lastFetched = null;
+    progressPercent = 5;
+    progressLabel = "Menyiapkan payload";
 
     try {
-      const payload: SubmitArticlePayload = { title, sender, receiver };
+      const payload: SubmitArticlePayload = { title, sender, receiver, articleId: crypto.randomUUID() };
 
       if (uploadType === "text") {
         if (!content.trim()) {
@@ -204,18 +260,24 @@
           statusDetail = `Maks ${(MAX_FILE_BYTES / 1024 / 1024).toFixed(0)} MB. File Anda: ${(selectedFile.size / 1024 / 1024).toFixed(2)} MB.`;
           return;
         }
+        progressPercent = 15;
+        progressLabel = "Membaca PDF ke base64";
         payload.fileData = await fileToBase64(selectedFile);
         payload.fileName = selectedFile.name;
       }
 
+      progressPercent = 20;
+      progressLabel = "Mengirim artikel ke service";
       const result = await submitArticle(payload);
-      status = "success";
+      status = "submitting";
       statusMessage = result.message;
       statusDetail = `Article ID tersimpan di database. Status: ${result.status}.`;
       articleId = result.articleId;
       clearForm();
       await onSubmitSuccess(result.articleId);
+      await pollProgress(result.articleId);
     } catch (err: unknown) {
+      stopProgressPolling();
       status = "error";
       statusMessage = errorMessage(err, "Gagal mengirim artikel");
       statusDetail = httpErrorIssues(err) || (err instanceof HttpError ? `HTTP ${err.status}` : "HTTP ?");
@@ -309,7 +371,7 @@
     <div class="pdf-field-wrapper">
       <div class="field">
         <label for="file">Pilih Dokumen PDF</label>
-        <div class="file-upload-box">
+        <label class="file-upload-box" for="file">
           <input
             type="file"
             id="file"
@@ -324,10 +386,10 @@
                 Selected: {selectedFile.name} ({(selectedFile.size / 1024).toFixed(1)} KB)
               </span>
             {:else}
-              <span>Klik untuk memilih PDF (maks 10 MB)</span>
+              <span>Klik untuk memilih PDF (maks 25 MB)</span>
             {/if}
           </div>
-        </div>
+        </label>
       </div>
     </div>
 
@@ -355,12 +417,21 @@
         {#if statusDetail}
           <p class="alert-detail">{statusDetail}</p>
         {/if}
+        {#if status === "submitting" || progressPercent > 0}
+          <div class="progress-wrap" aria-label="Progress pipeline" aria-valuemin="0" aria-valuemax="100" aria-valuenow={progressPercent}>
+            <div class="progress-bar" style="width: {progressPercent}%"></div>
+          </div>
+          <p class="progress-text">{progressPercent}% — {progressLabel}</p>
+        {/if}
         {#if articleId && status === "success"}
           <code class="article-id">ID: {articleId}</code>
           {#if lastFetched}
             <div class="db-record">
               <strong>DB record:</strong>
               <pre>{JSON.stringify(lastFetched, null, 2)}</pre>
+              {#if lastFetched.wordcloud_url}
+                <a class="wordcloud-link" href={lastFetched.wordcloud_url} target="_blank" rel="noreferrer">Buka wordcloud</a>
+              {/if}
             </div>
           {/if}
         {/if}
@@ -426,6 +497,17 @@
             <span class="status-pill" style="background: {statusColor(article.status)}">
               {article.status}
             </span>
+            {#if article.wordcloud_url}
+              <a
+                class="wordcloud-result-btn"
+                href={article.wordcloud_url}
+                target="_blank"
+                rel="noreferrer"
+                aria-label={`Lihat hasil wordcloud untuk ${article.title}`}
+              >
+                Lihat Wordcloud
+              </a>
+            {/if}
             <code class="mini-id" title={article.id}>
               {article.id.slice(0, 8)}…
             </code>
@@ -563,6 +645,24 @@
     font-size: 0.7rem;
     color: #6b7280;
   }
+  .wordcloud-result-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.3rem 0.55rem;
+    border-radius: 999px;
+    background: #eef2ff;
+    color: #4338ca;
+    border: 1px solid #c7d2fe;
+    font-size: 0.72rem;
+    font-weight: 800;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .wordcloud-result-btn:hover {
+    background: #4338ca;
+    color: #ffffff;
+  }
   .spinner-sm {
     display: inline-block;
     width: 10px;
@@ -573,6 +673,30 @@
     animation: spin 0.8s linear infinite;
     margin-right: 4px;
     vertical-align: middle;
+  }
+  .progress-wrap {
+    width: 100%;
+    height: 12px;
+    margin-top: 0.75rem;
+    border: 1px solid #d1d5db;
+    background: #f3f4f6;
+    overflow: hidden;
+  }
+  .progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, #111827, #2563eb, #10b981);
+    transition: width 0.3s ease;
+  }
+  .progress-text {
+    margin: 0.4rem 0 0;
+    font-size: 0.8rem;
+    color: #374151;
+  }
+  .wordcloud-link {
+    display: inline-block;
+    margin-top: 0.5rem;
+    font-weight: 700;
+    color: #1d4ed8;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
 </style>

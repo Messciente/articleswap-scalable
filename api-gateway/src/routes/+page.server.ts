@@ -1,11 +1,11 @@
 import { env } from "$env/dynamic/private";
-import { fail, type Actions } from "@sveltejs/kit";
+import { fail, redirect, type Actions } from "@sveltejs/kit";
 import type { PageServerLoad } from "./$types";
 import type { ListedArticle } from "$lib/api/articles";
 
 const DEFAULT_ARTICLE_SERVICE_URL = "http://localhost:3000";
 const LIST_LIMIT = 10;
-const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const MAX_FILE_BYTES = 25 * 1024 * 1024;
 
 type SubmitResult = {
   success: boolean;
@@ -131,13 +131,6 @@ export const actions: Actions = {
       });
     }
 
-    return {
-      submitResult: {
-        success: true,
-        message: body.message || "Article submitted successfully",
-        detail: `Article ID tersimpan di database. Status: ${body.status || "PENDING"}.`,
-        articleId: body.articleId
-      } satisfies SubmitResult
-    };
+    throw redirect(303, `/?submitted=${encodeURIComponent(body.articleId || "")}`);
   }
 };

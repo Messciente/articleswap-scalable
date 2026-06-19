@@ -1,4 +1,5 @@
 import { Article, ValidationError } from '../domain/Article.js';
+import { extractPdfText } from '../infrastructure/pdf/extractPdfText.js';
 
 export class SubmitArticle {
   constructor({ eventPublisher, articleRepository }) {
@@ -11,7 +12,15 @@ export class SubmitArticle {
       throw new ValidationError('Missing required fields: title, sender, receiver, and either content or a file');
     }
 
-    const article = Article.fromSubmitPayload(payload);
+    const normalizedPayload = { ...payload };
+    if (normalizedPayload.fileData && !normalizedPayload.content) {
+      normalizedPayload.content = await extractPdfText(normalizedPayload.fileData);
+      if (!normalizedPayload.content) {
+        throw new ValidationError('PDF text extraction returned empty content');
+      }
+    }
+
+    const article = Article.fromSubmitPayload(normalizedPayload);
     if (payload.articleId) {
       article.id = payload.articleId;
     }
@@ -34,7 +43,7 @@ export class SubmitArticle {
       await this.eventPublisher.publish({
         topic: process.env.KAFKA_TOPIC || 'article-submissions',
         key: article.id,
-        value: article
+        value: article.toEventPayload()
       });
     } catch (err) {
       if (this.articleRepository) {

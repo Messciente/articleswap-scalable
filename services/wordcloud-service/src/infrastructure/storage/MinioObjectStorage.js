@@ -13,7 +13,7 @@ export class MinioObjectStorage {
   }
 
   async upload(objectName, buffer, metaData = {}) {
-    await this.client.putObject(this.bucket, objectName, buffer, undefined, metaData);
+    await this.client.putObject(this.bucket, objectName, buffer, buffer.length, metaData);
   }
 
   publicUrl(objectName, publicBaseUrl) {

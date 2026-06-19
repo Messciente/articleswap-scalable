@@ -17,7 +17,7 @@ const ArticleSubmissionSchema = z.object({
   { message: 'Uploaded file must be a PDF', path: ['fileName'] }
 );
 
-const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const MAX_FILE_BYTES = 25 * 1024 * 1024;
 
 /**
  * HTTP routes for article submission + retrieval.
@@ -26,7 +26,7 @@ const MAX_FILE_BYTES = 10 * 1024 * 1024;
  * GET  /api/articles       — list articles (filters: sender, receiver, status)
  * GET  /api/articles/:id   — fetch by id (sans file_data to keep response light)
  */
-export function createArticlesRoute({ submitArticleUseCase, getArticleUseCase, listArticlesUseCase }) {
+export function createArticlesRoute({ submitArticleUseCase, getArticleUseCase, listArticlesUseCase, readCache }) {
   const router = Router();
 
   router.post('/articles', async (req, res) => {
@@ -50,6 +50,7 @@ export function createArticlesRoute({ submitArticleUseCase, getArticleUseCase, l
 
     try {
       const result = await submitArticleUseCase.execute(parsed.data);
+      readCache?.deleteWhere((key) => key.startsWith('list:'));
       return res.status(202).json({
         message: 'Article submitted successfully',
         articleId: result.articleId,
@@ -60,8 +61,7 @@ export function createArticlesRoute({ submitArticleUseCase, getArticleUseCase, l
         return res.status(409).json({ error: error.message });
       }
       const status = error.status || 500;
-      const body = { error: error.message };
-      if (status >= 500) body.details = error.message;
+      const body = { error: status >= 500 ? 'Internal server error' : error.message };
       console.error('[articles-route] submit error:', error);
       return res.status(status).json(body);
     }
@@ -72,6 +72,10 @@ export function createArticlesRoute({ submitArticleUseCase, getArticleUseCase, l
       return res.status(503).json({ error: 'ListArticles use case not available' });
     }
     try {
+      const cacheKey = `list:${JSON.stringify(req.query)}`;
+      const cached = readCache?.get(cacheKey);
+      if (cached) return res.json({ ...cached, cached: true });
+
       const { limit, offset, sender, receiver, status } = req.query;
       const result = await listArticlesUseCase.execute({
         limit: limit ? Number(limit) : undefined,
@@ -80,32 +84,37 @@ export function createArticlesRoute({ submitArticleUseCase, getArticleUseCase, l
         receiver: receiver || undefined,
         status: status || undefined
       });
+      readCache?.set(cacheKey, result);
       return res.json(result);
     } catch (error) {
       const status = error.status || 500;
-      const body = { error: error.message };
-      if (status >= 500) body.details = error.message;
+      const body = { error: status >= 500 ? 'Internal server error' : error.message };
       return res.status(status).json(body);
     }
   });
 
   router.get('/articles/:id', async (req, res) => {
     try {
+      const cacheKey = `article:${req.params.id}`;
+      const cached = readCache?.get(cacheKey);
+      if (cached) return res.json({ ...cached, cached: true });
+
       const article = await getArticleUseCase.execute(req.params.id);
       if (!article) {
         return res.status(404).json({ error: 'Article not found' });
       }
       // Strip file_data (heavy base64) — return only metadata.
       const { file_data, ...rest } = article;
-      return res.json({
+      const response = {
         ...rest,
         hasFile: Boolean(file_data),
         fileName: article.file_name
-      });
+      };
+      readCache?.set(cacheKey, response);
+      return res.json(response);
     } catch (error) {
       const status = error.status || 500;
-      const body = { error: error.message };
-      if (status >= 500) body.details = error.message;
+      const body = { error: status >= 500 ? 'Internal server error' : error.message };
       return res.status(status).json(body);
     }
   });
