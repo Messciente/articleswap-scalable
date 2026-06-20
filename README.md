@@ -275,3 +275,89 @@ Required secret: `GITHUB_TOKEN` (provided automatically). The workflow uses it t
 - **Mixed-language stemming** is heuristic; tokens with neither ID nor EN cues fall back to a majority-language pass (default `id`).
 - **Rate limit on POST** is per-IP. Set `TRUST_PROXY` to the number of trusted proxies (typically `1` behind Nginx).
 - **First publish** to a new RabbitMQ queue can race; `RabbitMQQueueEnsurer.ensure()` runs at startup.
+
+## Stress Testing Summary
+
+Stress testing dilakukan menggunakan **Grafana k6** terhadap endpoint `POST /api/articles` untuk mengevaluasi performa, validasi input, keamanan dasar, serta ketahanan sistem terhadap berbagai skenario abnormal.
+
+| Test Case | Result | Summary |
+|------------|---------|---------|
+| Normal Submission | PASS | Request valid diproses dengan tingkat keberhasilan 100%. |
+| Rate Limit Protection | PASS | Sistem berhasil membatasi spam menggunakan HTTP 429 tanpa menyebabkan crash. |
+| Large Payload Test | PARTIAL PASS | API menerima payload besar, namun pipeline NLP mengalami bottleneck dan backlog antrean > 3 jam. |
+| XSS Injection Test | PASS | Payload XSS berhasil diproses sebagai teks biasa dan tetap dapat diproses hingga wordcloud. |
+| SQL Injection Test | PASS | Payload SQL Injection tidak dieksekusi sebagai query dan tetap dapat diproses hingga wordcloud. |
+| Empty Payload Validation | PASS | Request tidak valid ditolak menggunakan HTTP 400 dengan pesan error yang jelas. |
+| Concurrent Virtual Users | PASS | Sistem tetap stabil saat menerima burst request bersamaan. |
+
+### Key Findings
+
+#### 1. API Stability
+
+Endpoint mampu menerima dan memproses request normal secara konsisten tanpa error maupun timeout.
+
+#### 2. Rate Limiting Works as Intended
+
+Saat menerima ribuan request dalam waktu singkat, sistem mengaktifkan mekanisme rate limiting dan mengembalikan:
+
+```json
+{
+  "error": "Too many article submissions from this IP. Please retry later.",
+  "retryAfterMs": 60000
+}
+```
+
+Hal ini mencegah abuse tanpa menyebabkan crash ataupun penurunan stabilitas aplikasi.
+
+#### 3. NLP Pipeline Handles Malicious Input
+
+Payload yang menyerupai serangan XSS maupun SQL Injection tidak menyebabkan error pada backend.
+
+Contoh payload:
+
+```html
+<script>alert("xss")</script>
+```
+
+```sql
+'; DROP TABLE articles; --
+```
+
+Selama preprocessing, karakter non-alfabet dihilangkan sehingga token yang tersisa tetap dapat diproses oleh:
+
+- Stemming Service
+- Word Frequency Analysis
+- Wordcloud Generator
+
+Contoh:
+
+```text
+<script>alert("xss")</script>
+```
+
+Menjadi:
+
+```text
+script alert xss script
+```
+
+dan tetap berhasil ditampilkan pada hasil wordcloud.
+
+#### 4. Large Payload Bottleneck
+
+Pengujian payload berukuran besar menunjukkan bahwa API tetap menerima request dengan sukses, namun proses NLP di backend mengalami bottleneck yang signifikan.
+
+Dampak yang diamati:
+
+- Stemming dan wordcloud membutuhkan waktu sangat lama untuk selesai.
+- Job berikutnya mengalami antrean pemrosesan.
+- Queue backlog bertahan selama lebih dari 3 jam.
+- API tetap responsif dan tidak mengalami crash.
+
+Temuan ini menunjukkan bahwa bottleneck utama sistem berada pada pipeline NLP asynchronous, bukan pada API Gateway maupun Article Service.
+
+### Conclusion
+
+Secara keseluruhan, ArticleSwap menunjukkan stabilitas yang baik pada sisi API, validasi input, proteksi spam, dan pemrosesan berbagai bentuk input tidak normal.
+
+Temuan utama dari stress testing adalah bahwa sistem berhasil mempertahankan kestabilan pada sebagian besar skenario pengujian, namun masih memerlukan optimasi pada pipeline NLP untuk menangani payload berukuran besar tanpa menyebabkan backlog pemrosesan yang berkepanjangan.
