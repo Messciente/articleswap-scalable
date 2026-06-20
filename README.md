@@ -278,27 +278,33 @@ Required secret: `GITHUB_TOKEN` (provided automatically). The workflow uses it t
 
 ## Stress Testing Summary
 
-Stress testing dilakukan menggunakan **Grafana k6** terhadap endpoint `POST /api/articles` untuk mengevaluasi performa, validasi input, keamanan dasar, serta ketahanan sistem terhadap berbagai skenario abnormal.
+Stress testing was conducted using **Grafana k6** against the `POST /api/articles` endpoint to evaluate system reliability, validation behavior, security resilience, and backend processing performance under both normal and abnormal conditions.
 
 | Test Case | Result | Summary |
 |------------|---------|---------|
-| Normal Submission | PASS | Request valid diproses dengan tingkat keberhasilan 100%. |
-| Rate Limit Protection | PASS | Sistem berhasil membatasi spam menggunakan HTTP 429 tanpa menyebabkan crash. |
-| Large Payload Test | PARTIAL PASS | API menerima payload besar, namun pipeline NLP mengalami bottleneck dan backlog antrean > 3 jam. |
-| XSS Injection Test | PASS | Payload XSS berhasil diproses sebagai teks biasa dan tetap dapat diproses hingga wordcloud. |
-| SQL Injection Test | PASS | Payload SQL Injection tidak dieksekusi sebagai query dan tetap dapat diproses hingga wordcloud. |
-| Empty Payload Validation | PASS | Request tidak valid ditolak menggunakan HTTP 400 dengan pesan error yang jelas. |
-| Concurrent Virtual Users | PASS | Sistem tetap stabil saat menerima burst request bersamaan. |
+| Normal Submission | PASS | Valid article submissions were processed successfully with a 100% success rate. |
+| Rate Limit Protection | PASS | The system successfully throttled excessive requests using HTTP 429 without affecting overall service availability. |
+| Large Payload Test | PARTIAL PASS | The API accepted large payloads successfully, but the NLP processing pipeline experienced severe queue backlog exceeding 3 hours. |
+| XSS Injection Test | PASS | XSS payloads were normalized into plain text and successfully processed through the entire NLP pipeline, including word cloud generation. |
+| SQL Injection Test | PASS | SQL Injection payloads were treated as plain text and successfully processed through the entire NLP pipeline, including word cloud generation. |
+| Empty Payload Validation | PASS | Invalid requests were rejected with proper HTTP 400 validation responses. |
+| Concurrent Virtual Users | PASS | The system remained stable under concurrent request bursts and continued enforcing rate limiting correctly. |
 
 ### Key Findings
 
 #### 1. API Stability
 
-Endpoint mampu menerima dan memproses request normal secara konsisten tanpa error maupun timeout.
+The Article Service successfully handled normal article submissions without errors, timeouts, or unexpected failures.
+
+- 100% success rate under normal conditions.
+- Consistent response times.
+- No service interruption observed during testing.
 
 #### 2. Rate Limiting Works as Intended
 
-Saat menerima ribuan request dalam waktu singkat, sistem mengaktifkan mekanisme rate limiting dan mengembalikan:
+Under high request volume, the system activated request throttling and returned HTTP 429 responses instead of allowing uncontrolled submission spikes.
+
+Example response:
 
 ```json
 {
@@ -307,57 +313,120 @@ Saat menerima ribuan request dalam waktu singkat, sistem mengaktifkan mekanisme 
 }
 ```
 
-Hal ini mencegah abuse tanpa menyebabkan crash ataupun penurunan stabilitas aplikasi.
+This behavior confirms that abuse protection mechanisms function correctly and prevent excessive resource consumption from a single client.
 
-#### 3. NLP Pipeline Handles Malicious Input
+#### 3. NLP Pipeline Successfully Handles XSS Payloads
 
-Payload yang menyerupai serangan XSS maupun SQL Injection tidak menyebabkan error pada backend.
+The system accepted XSS-like payloads without generating errors or disrupting downstream processing.
 
-Contoh payload:
+Example payload:
 
 ```html
 <script>alert("xss")</script>
+<img src=x onerror=alert("xss")>
 ```
 
-```sql
-'; DROP TABLE articles; --
-```
+During preprocessing, non-alphabetic symbols were removed before stemming and word cloud generation.
 
-Selama preprocessing, karakter non-alfabet dihilangkan sehingga token yang tersisa tetap dapat diproses oleh:
+Example transformation:
 
-- Stemming Service
-- Word Frequency Analysis
-- Wordcloud Generator
-
-Contoh:
+Input:
 
 ```text
 <script>alert("xss")</script>
 ```
 
-Menjadi:
+Processed result:
 
 ```text
 script alert xss script
 ```
 
-dan tetap berhasil ditampilkan pada hasil wordcloud.
+The resulting tokens were successfully:
 
-#### 4. Large Payload Bottleneck
+- Tokenized
+- Stemmed
+- Indexed for frequency analysis
+- Rendered in the generated word cloud
 
-Pengujian payload berukuran besar menunjukkan bahwa API tetap menerima request dengan sukses, namun proses NLP di backend mengalami bottleneck yang signifikan.
+No failures were observed in the NLP pipeline or word cloud generation process.
 
-Dampak yang diamati:
+#### 4. NLP Pipeline Successfully Handles SQL Injection Payloads
 
-- Stemming dan wordcloud membutuhkan waktu sangat lama untuk selesai.
-- Job berikutnya mengalami antrean pemrosesan.
-- Queue backlog bertahan selama lebih dari 3 jam.
-- API tetap responsif dan tidak mengalami crash.
+The system also accepted SQL Injection-like payloads as regular text input.
 
-Temuan ini menunjukkan bahwa bottleneck utama sistem berada pada pipeline NLP asynchronous, bukan pada API Gateway maupun Article Service.
+Example payload:
+
+```sql
+'; DROP TABLE articles; --
+```
+
+During preprocessing, special characters were removed while preserving valid textual tokens.
+
+Example transformation:
+
+Input:
+
+```text
+'; DROP TABLE articles; --
+```
+
+Processed result:
+
+```text
+DROP TABLE articles
+```
+
+The resulting tokens were successfully processed through:
+
+- Text preprocessing
+- Stemming
+- Word frequency analysis
+- Word cloud generation
+
+No database errors, query execution, table modifications, or backend exceptions were observed.
+
+#### 5. Large Payload Bottleneck
+
+The most significant issue discovered during testing involved extremely large article submissions.
+
+Although the API successfully accepted large payloads and returned successful responses, backend processing exhibited severe performance degradation.
+
+Observed behavior:
+
+- Large articles required an unusually long processing time.
+- Stemming and word cloud generation became significantly slower.
+- Subsequent jobs accumulated in the processing queue.
+- Queue backlog persisted for more than **3 hours**.
+- The API remained responsive and continued accepting new submissions.
+- The bottleneck occurred exclusively within the asynchronous NLP processing pipeline.
+
+This indicates that the primary scalability limitation currently resides in downstream processing rather than the HTTP layer itself.
+
+### Overall Assessment
+
+The system demonstrated strong reliability across normal usage scenarios, malformed requests, security-oriented payloads, and concurrent user activity.
+
+Strengths:
+
+- Stable API behavior.
+- Effective request validation.
+- Functional abuse protection through rate limiting.
+- Successful handling of XSS-like payloads.
+- Successful handling of SQL Injection-like payloads.
+- Robust NLP preprocessing capable of normalizing malicious-looking text while preserving meaningful tokens for analysis.
+
+Areas for Improvement:
+
+- Optimize stemming and word cloud generation performance.
+- Introduce processing limits for extremely large articles.
+- Improve queue management to prevent long-running jobs from blocking subsequent tasks.
+- Add monitoring and alerting for queue backlog growth.
 
 ### Conclusion
 
-Secara keseluruhan, ArticleSwap menunjukkan stabilitas yang baik pada sisi API, validasi input, proteksi spam, dan pemrosesan berbagai bentuk input tidak normal.
+ArticleSwap demonstrated strong operational stability during stress testing and successfully processed a wide variety of input types without crashing or producing unexpected behavior.
 
-Temuan utama dari stress testing adalah bahwa sistem berhasil mempertahankan kestabilan pada sebagian besar skenario pengujian, namun masih memerlukan optimasi pada pipeline NLP untuk menangani payload berukuran besar tanpa menyebabkan backlog pemrosesan yang berkepanjangan.
+The system's architecture proved resilient against malformed requests, excessive submission attempts, XSS payloads, SQL Injection payloads, and concurrent access patterns.
+
+The primary scalability concern identified during testing is the NLP processing pipeline, where extremely large payloads can cause prolonged queue backlog and significantly delay downstream processing. Future optimization efforts should focus on improving NLP throughput and queue management to ensure consistent performance under heavy workloads.
